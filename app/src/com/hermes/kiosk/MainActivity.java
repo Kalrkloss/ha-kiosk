@@ -37,6 +37,8 @@ public class MainActivity extends Activity {
     static final String TAG = "KIOSK";
     static final String PREFS = "kiosk";
     static final String PREF_URL = "url";
+    /** Optional exported service of another app to start after boot (see BootReceiver). */
+    static final String PREF_BOOT_SERVICE = "boot_service";
     /** Generic default; the real dashboard URL is normally set once (see docs/OPERATIONS.md). */
     static final String FALLBACK_URL = "http://homeassistant.local:8123/lovelace";
     static final int RETRY_MS = 10000;

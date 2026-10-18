@@ -88,6 +88,21 @@ Measured on the reference device: with only the consecutive-sample rule the kios
 suppression window and the rate limit, an idle room produces no wakes at all. Verify it that way
 rather than by eye: clear the log, leave the device alone, then count `wake` lines.
 
+## Companion service
+
+A locked kiosk cannot launch another app's activity (the system refuses it with lock task mode
+active), but **service starts are not restricted**. So the boot receiver also starts an optional
+companion service whose component is stored in a preference:
+
+```
+adb shell am broadcast -a com.hermes.kiosk.SET_BOOT_SERVICE --es component org.example.app/.PlayerService
+```
+
+The component must be `exported` by its own app and must not require a permission. A media player
+started this way calls `startForeground()` itself and keeps streaming behind the locked dashboard -
+verified with the Lyrion Squeezelite Android player: it reconnects and plays after a reboot without
+anyone touching the device. `RUN_BOOT_SERVICE` triggers the same code path on demand.
+
 ## Host-side control and evidence
 
 `ControlReceiver` exposes `STATUS`, `TEST_WAKE`, `SET_THRESHOLD` and `SET_URL` as broadcast actions,

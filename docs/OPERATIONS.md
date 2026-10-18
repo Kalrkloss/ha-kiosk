@@ -21,6 +21,11 @@ adb shell screencap -p /sdcard/s.png && adb pull /sdcard/s.png    # look at it
 # dashboard URL (persisted; intent data -d <url> overrides it for one launch)
 adb shell am broadcast -a com.hermes.kiosk.SET_URL --es url http://host:8123/lovelace
 
+# companion service: another app's exported service, started after every boot
+adb shell am broadcast -a com.hermes.kiosk.SET_BOOT_SERVICE --es component org.example.app/.PlayerService
+adb shell am broadcast -a com.hermes.kiosk.SET_BOOT_SERVICE --es component ""   # turn it off
+adb shell am broadcast -a com.hermes.kiosk.RUN_BOOT_SERVICE                      # start it now
+
 # motion wake
 adb shell am broadcast -a com.hermes.kiosk.STATUS                     # metric, threshold, wakes, screen
 adb shell am broadcast -a com.hermes.kiosk.SET_THRESHOLD --ei v 5     # default 7, lower = more sensitive
@@ -105,4 +110,5 @@ reported by `STATUS` while moving.
 | Motion never wakes the screen | Threshold too high (`STATUS` shows the live metric while you move), camera permission missing, or the device is unplugged and dozing. |
 | Wakes on its own every couple of minutes | The settle suppression after a panel state change is missing or too short, or the threshold is below the sensor noise floor. A panel going dark shifts exposure and is not motion. |
 | Wakes immediately after going dark | Same cause: the exposure settle window is too short. |
+| Companion app never starts | Its service is not `exported`, or it requires a permission, or the component string is wrong (`pkg/.Service`). Check `adb shell dumpsys package <pkg>` and the kiosk log tag `KIOSK`. |
 | Logcat lines missing | Expected on these devices — the ring buffer is tiny. Use `files/motion.log` via `run-as` (debug build). |

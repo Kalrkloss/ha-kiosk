@@ -12,6 +12,8 @@ import android.util.Log;
  *   adb shell am broadcast -a com.hermes.kiosk.TEST_WAKE          # same code path as camera motion
  *   adb shell am broadcast -a com.hermes.kiosk.SET_THRESHOLD --ei v 10
  *   adb shell am broadcast -a com.hermes.kiosk.SET_URL --es url http://host:8123/lovelace
+ *   adb shell am broadcast -a com.hermes.kiosk.SET_BOOT_SERVICE --es component org.example.app/.PlayerService
+ *   adb shell am broadcast -a com.hermes.kiosk.RUN_BOOT_SERVICE
  */
 public class ControlReceiver extends BroadcastReceiver {
     static final String TAG = "KIOSK";
@@ -19,6 +21,19 @@ public class ControlReceiver extends BroadcastReceiver {
     @Override public void onReceive(Context context, Intent intent) {
         String action = intent == null ? "null" : intent.getAction();
         MotionService svc = MotionService.instance;
+        if ("com.hermes.kiosk.SET_BOOT_SERVICE".equals(action)) {
+            String component = intent.getStringExtra("component");
+            context.getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE).edit()
+                    .putString(MainActivity.PREF_BOOT_SERVICE, component == null ? "" : component)
+                    .apply();
+            Log.i(TAG, "SET_BOOT_SERVICE " + component);
+            return;
+        }
+        if ("com.hermes.kiosk.RUN_BOOT_SERVICE".equals(action)) {
+            Log.i(TAG, "RUN_BOOT_SERVICE");
+            BootReceiver.startCompanionService(context);
+            return;
+        }
         if ("com.hermes.kiosk.SET_THRESHOLD".equals(action)) {
             int v = intent.getIntExtra("v", MotionService.threshold);
             MotionService.threshold = v;

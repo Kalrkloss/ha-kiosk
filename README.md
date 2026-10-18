@@ -21,6 +21,7 @@ API 23 and uses nothing that needs root.
 | Screen off when idle | The *system* screen timeout is used (default guidance: 60 s); the app sets no keep-awake flag |
 | Wake on motion | A foreground service watches the front camera and turns the screen back on when the picture changes |
 | Configurable at runtime | Dashboard URL, motion sensitivity and status can be set/read over adb (see below) |
+| Companion service after boot | Starts another app's exported service after a reboot (e.g. a music player) and keeps the kiosk locked in front |
 | Reversible | An adb-triggered escape hatch clears device-owner status and lock task |
 
 The panel showing an empty main area (sidebar only) right after the login redirect, and the trap of
@@ -81,6 +82,10 @@ Everything below is adb-only and needs no root.
 # move the dashboard elsewhere at runtime
 adb shell am broadcast -a com.hermes.kiosk.SET_URL --es url http://host:8123/lovelace
 
+# start another app's exported service after boot (and now, for testing)
+adb shell am broadcast -a com.hermes.kiosk.SET_BOOT_SERVICE --es component org.example.app/.PlayerService
+adb shell am broadcast -a com.hermes.kiosk.RUN_BOOT_SERVICE
+
 # motion wake: read state, tune sensitivity, simulate a detection
 adb shell am broadcast -a com.hermes.kiosk.STATUS
 adb shell am broadcast -a com.hermes.kiosk.SET_THRESHOLD --ei v 5    # default 7, lower = more sensitive
@@ -97,6 +102,20 @@ adb shell dpm set-device-owner com.hermes.kiosk/.KioskAdmin
 ```
 
 Detailed recipes and what each command proves: [docs/OPERATIONS.md](docs/OPERATIONS.md).
+
+## Use case: a kiosk that is also a music zone
+
+A locked kiosk cannot show another app's UI, but lock task mode does not block *service* starts, so
+a media player keeps running behind the dashboard. Point the companion service at a player whose
+service is exported, e.g. the Lyrion/Squeezelite Android player:
+
+```bash
+adb shell am broadcast -a com.hermes.kiosk.SET_BOOT_SERVICE --es component org.lyrion.squeezelite/.PlayerService
+```
+
+After that the player comes back on its own after every reboot, registers with the server and can be
+controlled from there (or from Home Assistant), while the dashboard stays in front. The player's own
+UI is unreachable while locked - configure it once before provisioning the kiosk.
 
 ## Limitations
 
