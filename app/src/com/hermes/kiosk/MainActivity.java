@@ -53,6 +53,7 @@ public class MainActivity extends Activity {
     boolean loadFailed = false;
     boolean released = false;
     boolean dimmed = false;
+    long lastLoad = System.currentTimeMillis();
     long lastInteraction;
     View dimOverlay;
     IdleCheck idleCheck;
@@ -69,6 +70,21 @@ public class MainActivity extends Activity {
         IdleCheck(MainActivity owner) { this.owner = owner; }
         @Override public void run() {
             owner.checkIdle();
+        }
+    }
+
+    /**
+     * Beat is the renderer's pulse. On API 23 there is no onRenderProcessGone, so a crashed
+     * renderer (observed here as a Chrome_InProcRenderer death under memory pressure) leaves a
+     * frozen or blank page that looks exactly like "the kiosk hangs". The injected JS calls
+     * remember() from a timer; a silent pulse means the page is gone and gets reloaded.
+     */
+    static class Beat {
+        static volatile long lastBeat = System.currentTimeMillis();
+
+        @android.webkit.JavascriptInterface
+        public void remember() {
+            lastBeat = System.currentTimeMillis();
         }
     }
 
@@ -146,11 +162,14 @@ public class MainActivity extends Activity {
         }
         web.setWebViewClient(new KioskClient(this));
         web.setWebChromeClient(new KioskChrome());
+        web.addJavascriptInterface(new Beat(), "kioskBeat");
+        installBeatScript(web);
         web.setBackgroundColor(Color.BLACK);
 
         setContentView(web, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         web.loadUrl(url);
+        lastLoad = System.currentTimeMillis();
 
         buildDimOverlay();
         lastInteraction = System.currentTimeMillis();
@@ -165,6 +184,9 @@ public class MainActivity extends Activity {
     /** How often the panel policy is re-evaluated. */
     static final long IDLE_CHECK_MS = 5000;
     static final long IDLE_TIMEOUT_MS = 60000;
+    static final long BEAT_TIMEOUT_MS = 90000;
+    static final long MAX_PAGE_AGE_MS = 6L * 60 * 60 * 1000;
+    static final int MAX_PSS_MB = 380;
 
     /**
      * Panel policy, evaluated every few seconds.
@@ -177,14 +199,77 @@ public class MainActivity extends Activity {
      */
     void checkIdle() {
         try {
-            if (released) return;
-            if (!dimmed && System.currentTimeMillis() - lastInteraction >= IDLE_TIMEOUT_MS) {
-                dimPanel();
+            if (!released) {
+                long now = System.currentTimeMillis();
+                if (!dimmed && now - lastInteraction >= IDLE_TIMEOUT_MS) dimPanel();
+                if (!dimmed) checkRendererAlive(now);
+                if (dimmed) maybeRecyclePage(now);
             }
         } catch (Exception e) {
             Log.e(TAG, "checkIdle " + e);
         }
         handler.postDelayed(idleCheck, IDLE_CHECK_MS);
+    }
+
+    /** A page that stopped answering its own pulse is dead: reload it. */
+    void checkRendererAlive(long now) {
+        long silence = now - Beat.lastBeat;
+        if (silence > BEAT_TIMEOUT_MS) {
+            ControlReceiver.log(this, "renderer silent " + (silence / 1000) + "s -> reload");
+            reloadPage("renderer-silent");
+        } else {
+            installBeatScript(web);
+        }
+    }
+
+    /**
+     * While nobody is looking, a long-lived Home Assistant frontend grows and eventually loses its
+     * renderer to the low-memory killer. Rebuilding the page in the dark is invisible and keeps the
+     * daytime session small.
+     */
+    void maybeRecyclePage(long now) {
+        int pss = myPssMb();
+        boolean tooBig = pss > MAX_PSS_MB;
+        boolean tooOld = now - lastLoad > MAX_PAGE_AGE_MS;
+        if (tooBig || tooOld) {
+            ControlReceiver.log(this, "page recycle (" + (tooBig ? "pss " + pss + "MB" : "")
+                    + (tooBig && tooOld ? ", " : "") + (tooOld ? "age " + ((now - lastLoad) / 60000) + "min" : "") + ")");
+            reloadPage("recycle");
+        }
+    }
+
+    int myPssMb() {
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager)
+                    getSystemService(Context.ACTIVITY_SERVICE);
+            android.os.Debug.MemoryInfo[] mi = am.getProcessMemoryInfo(new int[]{android.os.Process.myPid()});
+            return mi != null && mi.length > 0 ? mi[0].getTotalPss() / 1024 : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    void reloadPage(String why) {
+        try {
+            Log.i(TAG, "reloadPage " + why);
+            lastLoad = System.currentTimeMillis();
+            Beat.lastBeat = lastLoad;
+            if (web != null) web.loadUrl(url);
+        } catch (Exception e) {
+            Log.e(TAG, "reloadPage " + e);
+        }
+    }
+
+    /** Starts the pulse on whatever page is loaded (idempotent, survives navigations). */
+    void installBeatScript(WebView view) {
+        try {
+            view.evaluateJavascript(
+                "(function(){if(window.__kioskBeatTimer)return;"
+              + "var beat=function(){try{window.kioskBeat&&window.kioskBeat.remember();}catch(e){}};"
+              + "beat();window.__kioskBeatTimer=setInterval(beat,5000);})()", null);
+        } catch (Exception e) {
+            Log.e(TAG, "beat script " + e);
+        }
     }
 
     private void buildDimOverlay() {
@@ -202,6 +287,11 @@ public class MainActivity extends Activity {
             lp.screenBrightness = 0.0f;
             getWindow().setAttributes(lp);
             if (dimOverlay != null) dimOverlay.setVisibility(View.VISIBLE);
+            if (web != null) {
+                // A covered WebView keeps compositing; leaving it visible burns CPU (measured:
+                // 33 % of one core, non-stop) and heats the tablet until it throttles.
+                web.setVisibility(View.INVISIBLE);
+            }
         } catch (Exception e) {
             Log.e(TAG, "dimPanel " + e);
         }
@@ -218,6 +308,10 @@ public class MainActivity extends Activity {
             lp.screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
             getWindow().setAttributes(lp);
             if (dimOverlay != null) dimOverlay.setVisibility(View.GONE);
+            if (web != null) {
+                web.setVisibility(View.VISIBLE);
+                web.invalidate();
+            }
         } catch (Exception e) {
             Log.e(TAG, "undimPanel " + e);
         }

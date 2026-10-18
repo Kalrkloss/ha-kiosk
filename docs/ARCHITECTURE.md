@@ -69,6 +69,10 @@ Consequences that shaped the code:
 * inbound throughput is not a signal either — idle dashboard and a 128 kbit/s stream measured within
   0.5 kB/s of each other on this hardware.
 
+While dimmed the WebView is also set `INVISIBLE`: a covered WebView keeps compositing, which measured
+as 33 % of one core, non-stop, enough to make the tablet throttle and feel sluggish. Hiding it drops
+the idle load to single digits.
+
 So "panel looks off" and "the player keeps streaming in the background" only hold together while the
 panel stays powered and merely goes dark. `screen_off_timeout` remains configured as a fallback for
 the case where the app is not running:
@@ -136,7 +140,19 @@ started this way calls `startForeground()` itself and keeps streaming behind the
 verified with the Lyrion Squeezelite Android player: it reconnects and plays after a reboot without
 anyone touching the device. `RUN_BOOT_SERVICE` triggers the same code path on demand.
 
-- `CompanionWatch` rides on the motion service's existing one-second tick and checks the companion's
+- ## Renderer watchdog
+
+API 23 has no `onRenderProcessGone`, so a dead Chromium renderer (observed here as a
+`Chrome_InProcRenderer` crash under memory pressure) leaves a frozen or blank page that is
+indistinguishable from "the kiosk hangs". Two mechanisms keep the dashboard alive:
+
+* **Heartbeat** — an injected script calls `kioskBeat.remember()` over a `@JavascriptInterface`
+  every five seconds. Ninety seconds of silence means the page is gone and it is reloaded.
+* **Recycling while dark** — a long-lived Home Assistant frontend grows; when the process passes
+  ~380 MB PSS or the page is older than six hours, it is rebuilt. That happens while the panel is
+  dark, so nobody sees the reload, and the daytime session stays small.
+
+`CompanionWatch` rides on the motion service's existing one-second tick and checks the companion's
   process once a minute; two consecutive misses and a five-minute rate limit keep it from restarting
   a player that is merely slow to appear.
 

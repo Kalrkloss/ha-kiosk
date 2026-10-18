@@ -18,11 +18,13 @@ API 23 and uses nothing that needs root.
 | No lock screen | Device owner disables keyguard and status bar |
 | Survives reboot | `BOOT_COMPLETED` receiver starts the dashboard |
 | Survives a dead dashboard | Failed loads and the login redirect trigger a reload |
-| Panel dark when idle | After 60 s without touch or motion the panel dims to black but stays **powered** — switching it off costs the WiFi link and would stop a background player (see *Panel policy*) |
+| Panel dark when idle | After 60 s without touch or motion the panel dims to black but stays **powered**, and the WebView stops drawing — switching the panel off costs the WiFi link, letting it draw costs a third of a core around the clock (see *Panel policy*) |
 | Panel lights on motion | A foreground service watches the front camera; a change in the picture brings the dashboard back |
 | Configurable at runtime | Dashboard URL, motion sensitivity and status can be set/read over adb (see below) |
 | Companion service after boot | Starts another app's exported service after a reboot (e.g. a music player) and keeps the kiosk locked in front |
 | Keeps the companion alive | Watchdog restarts it within a minute if the low-memory killer reaps it |
+| Survives a dead renderer | A JS heartbeat detects a crashed/frozen page (no `onRenderProcessGone` on API 23) and reloads it |
+| Recycles the page while dark | The dashboard is rebuilt when its process grows past a threshold or the page is older than six hours |
 | Removes preinstalled apps | `HIDE_APP` hides vendor/Google bloat as device owner - the only way without root |
 | Reversible | An adb-triggered escape hatch clears device-owner status and lock task |
 
