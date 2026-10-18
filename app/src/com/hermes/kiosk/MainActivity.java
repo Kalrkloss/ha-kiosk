@@ -224,8 +224,10 @@ public class MainActivity extends Activity {
         ComponentName admin = new ComponentName(this, KioskAdmin.class);
         try {
             d.setLockTaskPackages(admin, new String[] { getPackageName() });
+            ControlReceiver.log(this, "lock task packages set: "
+                    + java.util.Arrays.toString(d.getLockTaskPackages(admin)));
         } catch (Exception e) {
-            Log.e(TAG, "setLockTaskPackages failed " + e);
+            ControlReceiver.log(this, "setLockTaskPackages FAILED: " + e);
         }
         try {
             // API 23: status bar and keyguard off, so no swipe-lock can gate the dashboard

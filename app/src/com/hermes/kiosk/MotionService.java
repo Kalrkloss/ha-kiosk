@@ -212,6 +212,7 @@ public class MotionService extends Service {
                     previous = new byte[data.length];
                 }
                 System.arraycopy(data, 0, previous, 0, Math.min(data.length, previous.length));
+                CompanionWatch.INSTANCE.tick(this);
             }
         } catch (Exception e) {
             Log.e(TAG, "onFrame " + e);

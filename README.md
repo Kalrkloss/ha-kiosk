@@ -22,6 +22,8 @@ API 23 and uses nothing that needs root.
 | Wake on motion | A foreground service watches the front camera and turns the screen back on when the picture changes |
 | Configurable at runtime | Dashboard URL, motion sensitivity and status can be set/read over adb (see below) |
 | Companion service after boot | Starts another app's exported service after a reboot (e.g. a music player) and keeps the kiosk locked in front |
+| Keeps the companion alive | Watchdog restarts it within a minute if the low-memory killer reaps it |
+| Removes preinstalled apps | `HIDE_APP` hides vendor/Google bloat as device owner - the only way without root |
 | Reversible | An adb-triggered escape hatch clears device-owner status and lock task |
 
 The panel showing an empty main area (sidebar only) right after the login redirect, and the trap of
@@ -86,6 +88,10 @@ adb shell am broadcast -a com.hermes.kiosk.SET_URL --es url http://host:8123/lov
 adb shell am broadcast -a com.hermes.kiosk.SET_BOOT_SERVICE --es component org.example.app/.PlayerService
 adb shell am broadcast -a com.hermes.kiosk.RUN_BOOT_SERVICE
 
+# remove preinstalled apps (device owner): hidden, not deleted, reversible
+adb shell am broadcast -a com.hermes.kiosk.HIDE_APP --es pkgs com.google.android.youtube,com.android.chrome
+adb shell am broadcast -a com.hermes.kiosk.UNHIDE_APP --es pkgs com.google.android.youtube
+
 # motion wake: read state, tune sensitivity, simulate a detection
 adb shell am broadcast -a com.hermes.kiosk.STATUS
 adb shell am broadcast -a com.hermes.kiosk.SET_THRESHOLD --ei v 5    # default 7, lower = more sensitive
@@ -116,6 +122,21 @@ adb shell am broadcast -a com.hermes.kiosk.SET_BOOT_SERVICE --es component org.l
 After that the player comes back on its own after every reboot, registers with the server and can be
 controlled from there (or from Home Assistant), while the dashboard stays in front. The player's own
 UI is unreachable while locked - configure it once before provisioning the kiosk.
+
+## Removing preinstalled apps without root
+
+`pm disable-user` and `pm hide` both fail from the shell on many vendor ROMs
+(`Permission Denial ... uid=2000`). The device owner can hide packages instead:
+
+```bash
+adb shell am broadcast -a com.hermes.kiosk.HIDE_APP --es pkgs <comma,separated,packages>
+adb shell am broadcast -a com.hermes.kiosk.UNHIDE_APP --es pkgs <packages>
+```
+
+Hidden packages lose their icon, cannot run and free their memory, and the state survives reboots.
+Two traps, learned the hard way: never hide `com.google.android.gsf` while Play services stay
+installed (GMS then crash-loops), and some ROMs refuse to hide `com.google.android.gms` itself -
+it reports `hidden=false` without an error. Results land in `files/control.log`.
 
 ## Limitations
 

@@ -88,6 +88,20 @@ Measured on the reference device: with only the consecutive-sample rule the kios
 suppression window and the rate limit, an idle room produces no wakes at all. Verify it that way
 rather than by eye: clear the log, leave the device alone, then count `wake` lines.
 
+## Boot reliability (measured on the reference device)
+
+Two findings worth keeping:
+
+- **`BOOT_COMPLETED` can be dropped.** It is an *ordered* broadcast: if an earlier receiver is slow
+  (a crash-looping Play services, a freshly re-scanned package database), the broadcast can time out
+  before the kiosk's receiver runs, and the kiosk simply does not come back. Keep the receiver, but
+  make sure nothing on the device is crash-looping at boot.
+- **Do not use the home-app trick here.** Registering the kiosk as the persistent home activity
+  (`addPersistentPreferredActivity`) does start it during boot, but on the reference ROM it also
+  breaks silent lock task: `mLockTaskModeState` stays `NONE` while `dumpsys activity` shows an empty
+  lock-task allowlist - only screen pinning would be left, which needs a confirmation the kiosk UI
+  cannot show. Reverting the registration brought `LOCKED` back immediately.
+
 ## Companion service
 
 A locked kiosk cannot launch another app's activity (the system refuses it with lock task mode
@@ -103,9 +117,14 @@ started this way calls `startForeground()` itself and keeps streaming behind the
 verified with the Lyrion Squeezelite Android player: it reconnects and plays after a reboot without
 anyone touching the device. `RUN_BOOT_SERVICE` triggers the same code path on demand.
 
+- `CompanionWatch` rides on the motion service's existing one-second tick and checks the companion's
+  process once a minute; two consecutive misses and a five-minute rate limit keep it from restarting
+  a player that is merely slow to appear.
+
 ## Host-side control and evidence
 
-`ControlReceiver` exposes `STATUS`, `TEST_WAKE`, `SET_THRESHOLD` and `SET_URL` as broadcast actions,
+`ControlReceiver` exposes `STATUS`, `TEST_WAKE`, `SET_THRESHOLD`, `SET_URL`, `SET_BOOT_SERVICE`,
+`RUN_BOOT_SERVICE`, `HIDE_APP` and `UNHIDE_APP` as broadcast actions,
 and `MotionService` appends events to `files/motion.log`. Together they make the feature inspectable
 without a screen and without a debugger — logcat on these devices is a small ring buffer that system
 spam evicts within seconds, so the file is the reliable channel (a debug build is needed for

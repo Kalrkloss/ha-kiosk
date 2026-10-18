@@ -52,6 +52,8 @@
                 <action android:name="com.hermes.kiosk.SET_URL" />
                 <action android:name="com.hermes.kiosk.SET_BOOT_SERVICE" />
                 <action android:name="com.hermes.kiosk.RUN_BOOT_SERVICE" />
+                <action android:name="com.hermes.kiosk.HIDE_APP" />
+                <action android:name="com.hermes.kiosk.UNHIDE_APP" />
             </intent-filter>
         </receiver>
 

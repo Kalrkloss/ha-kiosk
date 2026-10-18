@@ -13,7 +13,7 @@ public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent == null ? "null" : intent.getAction();
-        Log.i(TAG, "boot broadcast " + action);
+        ControlReceiver.log(context, "boot broadcast " + action);
         startKiosk(context);
         startCompanionService(context);
     }
@@ -24,8 +24,9 @@ public class BootReceiver extends BroadcastReceiver {
         start.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
         try {
             context.startActivity(start);
+            ControlReceiver.log(context, "kiosk start requested");
         } catch (Exception e) {
-            Log.e(TAG, "boot start failed " + e);
+            ControlReceiver.log(context, "boot start FAILED: " + e);
         }
     }
 

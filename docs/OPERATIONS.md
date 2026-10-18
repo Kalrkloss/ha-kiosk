@@ -41,6 +41,15 @@ adb shell run-as <pkg> cat files/motion.log
 status metric=4 threshold=7 hits=0 screen=true wakes=3
 ```
 
+## Removing preinstalled apps
+
+```bash
+adb shell am broadcast -a com.hermes.kiosk.HIDE_APP --es pkgs com.google.android.youtube,com.android.chrome
+adb shell am broadcast -a com.hermes.kiosk.UNHIDE_APP --es pkgs com.google.android.youtube
+adb shell run-as <pkg> cat files/control.log        # what actually happened
+adb shell dumpsys package <pkg> | grep "User 0:"    # hidden=true ?
+```
+
 ## Provisioning and un-provisioning
 
 ```bash
@@ -110,5 +119,7 @@ reported by `STATUS` while moving.
 | Motion never wakes the screen | Threshold too high (`STATUS` shows the live metric while you move), camera permission missing, or the device is unplugged and dozing. |
 | Wakes on its own every couple of minutes | The settle suppression after a panel state change is missing or too short, or the threshold is below the sensor noise floor. A panel going dark shifts exposure and is not motion. |
 | Wakes immediately after going dark | Same cause: the exposure settle window is too short. |
+| An app comes back after hiding it | It was hidden while running, or the ROM refuses to hide it (`hidden=false` in the log, e.g. GMS on some ROMs) - force-stop it as well. |
+| Player/media app disappears after a while | Low-memory kill. Check `adb shell 'cat /proc/meminfo | head -2'`, force-stop unused preinstalled apps (or hide them) and confirm the watchdog restarts the companion within a minute (`files/control.log`). |
 | Companion app never starts | Its service is not `exported`, or it requires a permission, or the component string is wrong (`pkg/.Service`). Check `adb shell dumpsys package <pkg>` and the kiosk log tag `KIOSK`. |
 | Logcat lines missing | Expected on these devices — the ring buffer is tiny. Use `files/motion.log` via `run-as` (debug build). |
