@@ -137,6 +137,19 @@ indistinguishable from "the kiosk hangs". Two mechanisms keep the dashboard aliv
 
 * **Heartbeat** — an injected script calls `kioskBeat.remember()` over a `@JavascriptInterface`
   every five seconds. Ninety seconds of silence means the page is gone and it is reloaded.
+* **Custom-element race** — Lovelace renders a card whose custom element is not registered *yet* as
+  a hard error card ("Custom element doesn't exist: …") and never re-renders it. Resources load
+  asynchronously, so a client whose engine is slow (or whose cache is cold) loses that race. A probe
+  looks for that error card right after a load and reloads once the resource is cached; the budget
+  is two reloads, which stops a loop when the element genuinely does not exist. Measured on the
+  reference device: `customElements.get()` is **not** a reliable presence test there (the frontend
+  swaps in a shim registry, so a natively defined element can be invisible to `get()` while
+  `document.createElement()` already upgrades), which is why the probe looks for the error card
+  rather than asking the registry.
+* **Runtime probes** — with no debugger on the device and logcat dropping app lines within seconds,
+  two adb broadcasts carry the diagnosis: `EVAL` (JavaScript in, result into `files/control.log`;
+  send it base64-encoded, a plain `--es` argument does not survive the adb shell) and `SET_UA`
+  (swap the user agent; Home Assistant picks its ES5 or modern bundle from it).
 * **Recycling while dark** — a long-lived Home Assistant frontend grows; when the process passes
   ~380 MB PSS or the page is older than six hours, it is rebuilt. That happens while the screen is
   off, so nobody sees the reload, and the daytime session stays small.

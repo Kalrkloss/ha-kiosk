@@ -48,6 +48,36 @@ public class ControlReceiver extends BroadcastReceiver {
             if (svc != null) svc.note("threshold=" + v);
             return;
         }
+        if ("com.hermes.kiosk.SET_UA".equals(action)) {
+            String ua = intent.getStringExtra("ua");
+            context.getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE).edit()
+                    .putString(MainActivity.PREF_USER_AGENT, ua == null ? "" : ua).apply();
+            Log.i(TAG, "SET_UA " + ua);
+            log(context, "SET_UA " + (ua == null ? "(stock)" : ua));
+            return;
+        }
+        if ("com.hermes.kiosk.EVAL".equals(action)) {
+            String js = intent.getStringExtra("js");
+            // Base64 form: adb re-parses a shell command line, so anything with quotes, brackets
+            // or pipes gets mangled on the way in; encoded JS survives untouched.
+            String b64 = intent.getStringExtra("b64");
+            if (b64 != null) {
+                try {
+                    js = new String(android.util.Base64.decode(b64, android.util.Base64.DEFAULT), "UTF-8");
+                } catch (Exception e) {
+                    log(context, "EVAL b64 decode failed " + e);
+                    return;
+                }
+            }
+            Log.i(TAG, "EVAL");
+            MainActivity act = MainActivity.instance;
+            if (act != null && js != null) {
+                act.evalAndLog(js);
+            } else {
+                log(context, "EVAL ohne laufende Activity");
+            }
+            return;
+        }
         if ("com.hermes.kiosk.SET_URL".equals(action)) {
             String url = intent.getStringExtra("url");
             Log.i(TAG, "SET_URL " + url);

@@ -24,6 +24,8 @@ API 23 and uses nothing that needs root.
 | Companion service after boot | Starts another app's exported service after a reboot (e.g. a music player) and keeps the kiosk locked in front |
 | Keeps the companion alive | Watchdog restarts it within a minute if the low-memory killer reaps it |
 | Survives a dead renderer | A JS heartbeat detects a crashed/frozen page (no `onRenderProcessGone` on API 23) and reloads it |
+| Heals the custom-card race | Probes for Lovelace's "Custom element doesn't exist" error card and reloads (max twice) so a slow client still gets the card |
+| Runtime probes over adb | `EVAL` runs JavaScript in the dashboard and writes the answer to the log; `SET_UA` swaps the user agent |
 | Recycles the page while dark | The dashboard is rebuilt when its process grows past a threshold or the page is older than six hours |
 | Removes preinstalled apps | `HIDE_APP` hides vendor/Google bloat as device owner - the only way without root |
 | Reversible | An adb-triggered escape hatch clears device-owner status and lock task |

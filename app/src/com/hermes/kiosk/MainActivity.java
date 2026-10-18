@@ -42,6 +42,14 @@ public class MainActivity extends Activity {
     /** Generic default; the real dashboard URL is normally set once (see docs/OPERATIONS.md). */
     static final String FALLBACK_URL = "http://homeassistant.local:8123/lovelace";
     static final int RETRY_MS = 10000;
+    static final String PREF_USER_AGENT = "user_agent";
+    /**
+     * Empty: the WebView keeps its stock user agent, so Home Assistant serves its ES5 bundle - the
+     * path it reserves for this engine's UA. Reporting a newer Chrome gets the modern bundle
+     * (verified to render on this device, and it does drop the legacy polyfills); set it with
+     * `am broadcast -a com.hermes.kiosk.SET_UA --es ua "<ua>"` when that is wanted.
+     */
+    static final String DEFAULT_USER_AGENT = "";
 
     /** Only used so the control receiver can push a new URL into a running kiosk. */
     static volatile MainActivity instance;
@@ -53,6 +61,8 @@ public class MainActivity extends Activity {
     boolean loadFailed = false;
     boolean released = false;
     long lastLoad = System.currentTimeMillis();
+    long lastCardErrorReload;
+    int cardErrorReloads;
     IdleCheck idleCheck;
 
     /**
@@ -78,10 +88,42 @@ public class MainActivity extends Activity {
      */
     static class Beat {
         static volatile long lastBeat = System.currentTimeMillis();
+        /** Last "Custom element doesn't exist" seen by the probe, "" when clean. */
+        static volatile String cardError = "";
 
         @android.webkit.JavascriptInterface
         public void remember() {
             lastBeat = System.currentTimeMillis();
+        }
+
+        @android.webkit.JavascriptInterface
+        public void cardError(String message) {
+            cardError = message == null ? "" : message;
+        }
+    }
+
+    /**
+     * Runs JS in the dashboard and appends the answer to control.log. There is no debugger on the
+     * device and logcat drops app lines within seconds, so this is the only way to read what the
+     * frontend actually rendered (e.g. why a Lovelace card reports a configuration error).
+     */
+    void evalAndLog(String js) {
+        try {
+            web.evaluateJavascript(js, new EvalSink(this));
+        } catch (Exception e) {
+            ControlReceiver.log(this, "EVAL failed " + e);
+        }
+    }
+
+    /** d8-safe named callback: raw ValueCallback, result appended to control.log. */
+    static class EvalSink implements android.webkit.ValueCallback {
+        private final MainActivity owner;
+        EvalSink(MainActivity owner) { this.owner = owner; }
+
+        @Override public void onReceiveValue(Object value) {
+            String text = value == null ? "null" : value.toString();
+            if (text.length() > 2000) text = text.substring(0, 2000) + "…";
+            ControlReceiver.log(owner, "EVAL -> " + text);
         }
     }
 
@@ -155,6 +197,17 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 17) {
             s.setMediaPlaybackRequiresUserGesture(false);
         }
+        // The stock WebView UA ("... Version/4.0 Chrome/106 ...") makes Home Assistant serve its
+        // ES5 legacy bundle, and in that bundle custom cards never show up in the registry Lovelace
+        // checks - it renders "configuration error" for cards that are actually defined. A UA a
+        // current Chrome would send gets the modern bundle. Empty pref = untouched stock UA.
+        String ua = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getString(PREF_USER_AGENT, DEFAULT_USER_AGENT);
+        if (ua != null && ua.length() > 0) {
+            WebSettings us = web.getSettings();
+            us.setUserAgentString(ua);
+            Log.i(TAG, "user agent " + us.getUserAgentString());
+        }
         web.setWebViewClient(new KioskClient(this));
         web.setWebChromeClient(new KioskChrome());
         web.addJavascriptInterface(new Beat(), "kioskBeat");
@@ -177,7 +230,12 @@ public class MainActivity extends Activity {
     /** How often the panel policy is re-evaluated. */
     static final long IDLE_CHECK_MS = 5000;
     static final long BEAT_TIMEOUT_MS = 90000;
+    /** Reload budget for the custom-element race, per page load. */
+    static final int CARD_ERROR_RELOAD_LIMIT = 2;
+    static final long CARD_ERROR_RELOAD_COOLDOWN_MS = 20000;
     static final long MAX_PAGE_AGE_MS = 6L * 60 * 60 * 1000;
+    /** How long after a load the custom-element race is worth watching for. */
+    static final long CARD_ERROR_PROBE_WINDOW_MS = 3L * 60 * 1000;
     static final int MAX_PSS_MB = 380;
 
     /**
@@ -195,6 +253,7 @@ public class MainActivity extends Activity {
                 long now = System.currentTimeMillis();
                 if (screenOn()) {
                     checkRendererAlive(now);
+                    probeCardErrors(now);
                 } else {
                     maybeRecyclePage(now);
                 }
@@ -203,6 +262,36 @@ public class MainActivity extends Activity {
             Log.e(TAG, "checkIdle " + e);
         }
         handler.postDelayed(idleCheck, IDLE_CHECK_MS);
+    }
+
+    /**
+     * Lovelace renders a card whose custom element is not registered *yet* as a hard error card
+     * ("Custom element doesn't exist: …") and never re-renders it. Resources are fetched
+     * asynchronously, so a cold cache loses that race on a slow client. One reload reads them from
+     * the cache and the dashboard comes back complete; the budget stops a reload loop when the
+     * element genuinely does not exist.
+     */
+    void probeCardErrors(long now) {
+        if (now - lastLoad > CARD_ERROR_PROBE_WINDOW_MS) return;
+        try {
+            web.evaluateJavascript(
+                "(function(){var f='';var w=function(r,d){if(!r||d>40)return;var e=r.querySelectorAll('hui-error-card');"
+              + "for(var i=0;i<e.length;i++){var m=(e[i]._config&&e[i]._config.message)||'';if(m.indexOf(\"Custom element doesn't exist\")>=0)f=m;}"
+              + "var a=r.querySelectorAll('*');for(var j=0;j<a.length;j++){if(a[j].shadowRoot)w(a[j].shadowRoot,d+1);}};w(document,0);"
+              + "try{window.kioskBeat.cardError(f);}catch(e){}return f;})()", null);
+        } catch (Exception e) {
+            return;
+        }
+        String err = Beat.cardError;
+        if (err == null || err.length() == 0) return;
+        if (cardErrorReloads >= CARD_ERROR_RELOAD_LIMIT) return;
+        if (now - lastCardErrorReload < CARD_ERROR_RELOAD_COOLDOWN_MS) return;
+        lastCardErrorReload = now;
+        cardErrorReloads++;
+        ControlReceiver.log(this, "card error (" + err + ") -> reload " + cardErrorReloads
+                + "/" + CARD_ERROR_RELOAD_LIMIT);
+        Beat.cardError = "";
+        reloadPage("card-error");
     }
 
     /** A page that stopped answering its own pulse is dead: reload it. */
@@ -247,6 +336,7 @@ public class MainActivity extends Activity {
         try {
             Log.i(TAG, "reloadPage " + why);
             lastLoad = System.currentTimeMillis();
+            if (!"card-error".equals(why)) cardErrorReloads = 0;
             Beat.lastBeat = lastLoad;
             if (web != null) web.loadUrl(url);
         } catch (Exception e) {

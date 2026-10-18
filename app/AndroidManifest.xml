@@ -50,6 +50,8 @@
                 <action android:name="com.hermes.kiosk.TEST_WAKE" />
                 <action android:name="com.hermes.kiosk.SET_THRESHOLD" />
                 <action android:name="com.hermes.kiosk.SET_URL" />
+                <action android:name="com.hermes.kiosk.EVAL" />
+                <action android:name="com.hermes.kiosk.SET_UA" />
                 <action android:name="com.hermes.kiosk.SET_BOOT_SERVICE" />
                 <action android:name="com.hermes.kiosk.RUN_BOOT_SERVICE" />
                 <action android:name="com.hermes.kiosk.HIDE_APP" />
