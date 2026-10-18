@@ -52,6 +52,25 @@ public class MainActivity extends Activity {
     Reloader reloader;
     boolean loadFailed = false;
     boolean released = false;
+    boolean dimmed = false;
+    long lastInteraction;
+    View dimOverlay;
+    IdleCheck idleCheck;
+
+    /**
+     * Dims the panel after the idle timeout instead of letting the system power it off.
+     * Measured on the reference device: a powered-off panel takes the WiFi with it (vendor
+     * standby power saving wins over wifi_sleep_policy and a WIFI_MODE_FULL_HIGH_PERF lock), which
+     * silently drops the dashboard and any companion player off the network. A dark but powered
+     * panel keeps both alive at the cost of the backlight.
+     */
+    static class IdleCheck implements Runnable {
+        private final MainActivity owner;
+        IdleCheck(MainActivity owner) { this.owner = owner; }
+        @Override public void run() {
+            owner.checkIdle();
+        }
+    }
 
     /** d8-safe named Runnable used for the load retries. */
     static class Reloader implements Runnable {
@@ -98,8 +117,8 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         instance = this;
-        // Deliberately no FLAG_KEEP_SCREEN_ON: the system screen timeout turns the panel off
-        // after the configured idle time, and MotionService wakes it again.
+        // The panel must stay powered (see checkIdle): dark, but never switched off.
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         Intent intent0 = getIntent();
         if (intent0 != null && intent0.getBooleanExtra("kiosk_clear_device_owner", false)) {
@@ -133,9 +152,83 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         web.loadUrl(url);
 
+        buildDimOverlay();
+        lastInteraction = System.currentTimeMillis();
+        idleCheck = new IdleCheck(this);
+        handler.postDelayed(idleCheck, IDLE_CHECK_MS);
+
         applyDeviceOwnerPolicies();
         startMotionService();
         goFullscreen();
+    }
+
+    /** How often the panel policy is re-evaluated. */
+    static final long IDLE_CHECK_MS = 5000;
+    static final long IDLE_TIMEOUT_MS = 60000;
+
+    /**
+     * Panel policy, evaluated every few seconds.
+     *
+     * The panel goes visually dark after the idle timeout but stays *powered*. Measured on the
+     * reference device: a powered-off panel takes the WiFi with it (vendor standby power saving
+     * beats wifi_sleep_policy and a WIFI_MODE_FULL_HIGH_PERF lock), so screen-off and "the player
+     * keeps streaming in the background" cannot both be had. A dark panel is the only state in
+     * which the dashboard, the radio and any companion player stay online.
+     */
+    void checkIdle() {
+        try {
+            if (released) return;
+            if (!dimmed && System.currentTimeMillis() - lastInteraction >= IDLE_TIMEOUT_MS) {
+                dimPanel();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "checkIdle " + e);
+        }
+        handler.postDelayed(idleCheck, IDLE_CHECK_MS);
+    }
+
+    private void buildDimOverlay() {
+        dimOverlay = new View(this);
+        dimOverlay.setBackgroundColor(Color.BLACK);
+        dimOverlay.setVisibility(View.GONE);
+        addContentView(dimOverlay, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    void dimPanel() {
+        dimmed = true;
+        try {
+            android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.screenBrightness = 0.0f;
+            getWindow().setAttributes(lp);
+            if (dimOverlay != null) dimOverlay.setVisibility(View.VISIBLE);
+        } catch (Exception e) {
+            Log.e(TAG, "dimPanel " + e);
+        }
+        ControlReceiver.log(this, "panel dark");
+    }
+
+    /** Called on touch/key input and on camera motion. */
+    void undimPanel(String why) {
+        lastInteraction = System.currentTimeMillis();
+        if (!dimmed) return;
+        dimmed = false;
+        try {
+            android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+            getWindow().setAttributes(lp);
+            if (dimOverlay != null) dimOverlay.setVisibility(View.GONE);
+        } catch (Exception e) {
+            Log.e(TAG, "undimPanel " + e);
+        }
+        ControlReceiver.log(this, "panel visible (" + why + ")");
+        goFullscreen();
+    }
+
+    @Override
+    public void onUserInteraction() {
+        super.onUserInteraction();
+        undimPanel("touch");
     }
 
     /** Intent data wins, then the stored preference, then the generic default. */
@@ -174,6 +267,9 @@ public class MainActivity extends Activity {
         goFullscreen();
         if (loadFailed) scheduleRetry();
         enterLockTaskIfPossible();
+        // The panel (and with it the radio) may have been down: whenever the dashboard comes back
+        // to the front, poke the companion service so it registers with its server again.
+        BootReceiver.startCompanionService(this);
     }
 
     @Override
@@ -278,6 +374,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         handler.removeCallbacks(reloader);
+        if (idleCheck != null) handler.removeCallbacks(idleCheck);
         if (instance == this) instance = null;
         super.onDestroy();
     }

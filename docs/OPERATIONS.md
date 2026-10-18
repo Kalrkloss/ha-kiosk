@@ -79,8 +79,8 @@ adb shell input keyevent 187  # Recents
 adb shell input keyevent 4    # Back
 adb shell dumpsys activity activities | grep mFocusedActivity        # still the kiosk
 
-# 2. screen off after the configured idle time, and no self-inflicted wake
-adb shell settings get system screen_off_timeout                     # 60000
+# 2. panel goes dark after the idle time without switching off (WiFi stays up)
+adb shell run-as <pkg> cat files/control.log | tail -2                # panel dark / panel visible (...)
 sleep 90
 adb shell dumpsys power | grep mWakefulness                          # -> Asleep
 adb shell run-as <pkg> cat files/motion.log | tail -3                # metric low, screen=false, no wake

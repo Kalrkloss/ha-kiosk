@@ -67,14 +67,14 @@ final class CompanionWatch {
                     return;
                 }
                 watch.misses++;
-                Log.i(TAG, "companion " + pkg + " missing (" + watch.misses + ")");
+                ControlReceiver.log(context, "companion " + pkg + " missing (" + watch.misses + ")");
                 if (watch.misses < MISSES_BEFORE_RESTART) return;
                 long now = android.os.SystemClock.uptimeMillis();
                 if (now - watch.lastRestart < MIN_RESTART_INTERVAL_MS) return;
                 watch.lastRestart = now;
                 watch.misses = 0;
                 BootReceiver.startCompanionService(context);
-                Log.i(TAG, "companion restart requested: " + spec);
+                ControlReceiver.log(context, "companion restart requested: " + spec);
             } catch (Exception e) {
                 Log.e(TAG, "companion check failed " + e);
             }

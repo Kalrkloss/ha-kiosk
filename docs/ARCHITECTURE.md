@@ -50,11 +50,28 @@ command line; `-e` sends a string and `getBooleanExtra` then returns false.
 `FLAG_ACTIVITY_NEW_TASK`. On API 23 a background broadcast may still start an activity, which is one
 more reason `targetSdkVersion` stays at 23.
 
-## Screen off and motion wake
+## Panel policy and motion wake
 
-The split of responsibility matters: **the app never holds the screen awake**, and the panel is
-switched off by the normal power policy after `screen_off_timeout` (60 s in the reference setup).
-Two settings make that work on a device that is permanently charging:
+The panel goes dark after 60 s without touch and without camera motion, but it is **never switched
+off**: the app holds `FLAG_KEEP_SCREEN_ON` and dims the window itself (brightness 0 plus a black
+overlay) instead of letting the system timeout power the display down.
+
+That is a measured decision. On the reference device the WiFi link dies with the panel: `wlan0` drops
+to `NO-CARRIER` within seconds of the display powering off and is back as soon as it wakes. The
+vendor standby power saving wins over `wifi_sleep_policy=2`, over an acquired
+`WIFI_MODE_FULL_HIGH_PERF` lock and over `background_power_saving_enable=0`, and it is not a traffic
+idle timeout either — the interface has no route at all, so a keep-alive from an app cannot help.
+Consequences that shaped the code:
+
+* a powered-off panel means no dashboard, no radio, and any companion player drops off its server;
+* `AudioManager.isMusicActive()` is **not** a usable "is it playing" signal here: the music player
+  keeps an active `AudioTrack` while idle, so the call returns `true` permanently;
+* inbound throughput is not a signal either — idle dashboard and a 128 kbit/s stream measured within
+  0.5 kB/s of each other on this hardware.
+
+So "panel looks off" and "the player keeps streaming in the background" only hold together while the
+panel stays powered and merely goes dark. `screen_off_timeout` remains configured as a fallback for
+the case where the app is not running:
 
 ```
 settings put system screen_off_timeout 60000
@@ -65,15 +82,17 @@ svc power stayon false          # a charging device would otherwise never sleep
 
 1. opens the **front camera** through the Camera1 API at the smallest preview size of at least
    320x240 and throttles analysis to about one frame per second;
-2. uses a dummy `SurfaceTexture` as the preview target — there is no window surface to lose when
-   the panel turns off, which is exactly what would break a SurfaceView-based preview;
+2. uses a dummy `SurfaceTexture` as the preview target — there is no window surface to lose when the
+   panel is off or dimmed, which is exactly what would break a SurfaceView-based preview;
 3. holds a `PARTIAL_WAKE_LOCK` so frames keep arriving while the screen is dark, and an ongoing
    `PRIORITY_MIN` notification (no channel needed on API 23) so the process is not killed;
 4. computes the **mean absolute difference of the luma plane** against the previous analysed frame,
    sampled on an 8-pixel grid. Two *consecutive* samples above the threshold (default 7 of 255)
    count as motion;
-5. turns the screen back on with `SCREEN_BRIGHT_WAKE_LOCK | ACQUIRE_CAUSES_WAKEUP` (deprecated, but
-   the only public way; a device owner cannot switch a screen *on*). Release after 20 s.
+5. clears the dim (`panel visible (motion)`); as a fallback for the case where the system *did*
+   switch the panel off, it also acquires `SCREEN_BRIGHT_WAKE_LOCK | ACQUIRE_CAUSES_WAKEUP`
+   (deprecated, but the only public way — a device owner cannot switch a screen *on*), released
+   after 20 s.
 
 Three guards keep this from waking the screen by itself, and all three are needed:
 

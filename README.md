@@ -18,8 +18,8 @@ API 23 and uses nothing that needs root.
 | No lock screen | Device owner disables keyguard and status bar |
 | Survives reboot | `BOOT_COMPLETED` receiver starts the dashboard |
 | Survives a dead dashboard | Failed loads and the login redirect trigger a reload |
-| Screen off when idle | The *system* screen timeout is used (default guidance: 60 s); the app sets no keep-awake flag |
-| Wake on motion | A foreground service watches the front camera and turns the screen back on when the picture changes |
+| Panel dark when idle | After 60 s without touch or motion the panel dims to black but stays **powered** — switching it off costs the WiFi link and would stop a background player (see *Panel policy*) |
+| Panel lights on motion | A foreground service watches the front camera; a change in the picture brings the dashboard back |
 | Configurable at runtime | Dashboard URL, motion sensitivity and status can be set/read over adb (see below) |
 | Companion service after boot | Starts another app's exported service after a reboot (e.g. a music player) and keeps the kiosk locked in front |
 | Keeps the companion alive | Watchdog restarts it within a minute if the low-memory killer reaps it |
@@ -64,7 +64,7 @@ adb shell am broadcast -a com.hermes.kiosk.SET_URL --es url http://your-host:812
 # camera permission for the motion wake (targetSdk 23 => runtime permission)
 adb shell pm grant com.hermes.kiosk android.permission.CAMERA
 
-# screen off after 60 s of idle, and do not keep the screen on just because it is charging
+# fallback only: the app keeps the panel powered and dims it itself (see Panel policy)
 adb shell settings put system screen_off_timeout 60000
 adb shell svc power stayon false
 
@@ -142,6 +142,11 @@ it reports `hidden=false` without an error. Results land in `files/control.log`.
 
 - **Android 6/7 era only.** `targetSdkVersion` is pinned to 23 on purpose: no runtime-permission
   prompts, and background activity starts still work. Raising it changes that behaviour.
+- **A powered-off panel takes WiFi with it.** Measured on the reference device: the link drops to
+  `NO-CARRIER` seconds after the display powers down and returns when it wakes, no matter what
+  `wifi_sleep_policy`, `background_power_saving_enable` or a `WIFI_MODE_FULL_HIGH_PERF` lock say. The
+  panel is therefore dimmed, not switched off — that is the only way a companion player keeps
+  streaming while the screen looks dark.
 - **Camera motion needs power.** Unplugged, Android 6 doze (idle + stationary) suspends the wake
   locks and the preview loop, so the wake stops working. A permanently powered kiosk is unaffected.
   Keeping a camera open is also a constant drain, which is the price of camera-based detection.
