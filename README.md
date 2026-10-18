@@ -18,7 +18,7 @@ API 23 and uses nothing that needs root.
 | No lock screen | Device owner disables keyguard and status bar |
 | Survives reboot | `BOOT_COMPLETED` receiver starts the dashboard |
 | Survives a dead dashboard | Failed loads and the login redirect trigger a reload |
-| Screen off when idle | The *system* screen timeout switches the panel off (default guidance: 60 s); the app sets no keep-awake flag |
+| Screen off when idle | The *system* screen timeout switches the panel off (60 s–5 min, whatever the device is set to); the app sets no keep-awake flag |
 | Wake on motion | A foreground service watches the front camera and turns the screen back on when the picture changes |
 | Configurable at runtime | Dashboard URL, motion sensitivity and status can be set/read over adb (see below) |
 | Companion service after boot | Starts another app's exported service after a reboot (e.g. a music player) and keeps the kiosk locked in front |
@@ -66,8 +66,9 @@ adb shell am broadcast -a com.hermes.kiosk.SET_URL --es url http://your-host:812
 # camera permission for the motion wake (targetSdk 23 => runtime permission)
 adb shell pm grant com.hermes.kiosk android.permission.CAMERA
 
-# screen off after 60 s of idle, and do not keep the screen on just because it is charging
-adb shell settings put system screen_off_timeout 60000
+# screen off when idle (value is a policy choice: every wake re-associates the radio, so a longer
+# timeout means fewer dead windows), and do not keep the screen on just because it is charging
+adb shell settings put system screen_off_timeout 300000
 adb shell svc power stayon false
 
 # real kiosk mode: device owner (fails if the device has accounts configured)

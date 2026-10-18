@@ -53,11 +53,13 @@ more reason `targetSdkVersion` stays at 23.
 ## Screen off and motion wake
 
 The split of responsibility matters: **the app never holds the screen awake**, and the panel is
-switched off by the normal power policy after `screen_off_timeout` (60 s in the reference setup).
+switched off by the normal power policy after `screen_off_timeout` (the reference device runs five
+minutes: every wake costs a few seconds until the radio is associated again, so a longer timeout
+buys fewer dead windows).
 Two settings make that work on a device that is permanently charging:
 
 ```
-settings put system screen_off_timeout 60000
+settings put system screen_off_timeout 300000
 svc power stayon false          # a charging device would otherwise never sleep
 ```
 
