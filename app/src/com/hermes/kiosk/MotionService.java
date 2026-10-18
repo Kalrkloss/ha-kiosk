@@ -51,7 +51,6 @@ public class MotionService extends Service {
     static final long MIN_WAKE_INTERVAL_MS = 20000;
     PowerManager.WakeLock partial;
     PowerManager.WakeLock screenWaker;
-    android.net.wifi.WifiManager.WifiLock wifiLock;
 
     /** Named static callback (d8-safe). */
     static class PreviewSink implements Camera.PreviewCallback {
@@ -75,23 +74,6 @@ public class MotionService extends Service {
         screenWaker = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK
                 | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE, "kiosk:wake");
         screenWaker.setReferenceCounted(false);
-
-        // Keep the radio associated while the panel is dark. Measured on the reference device:
-        // with the screen off the ROM powers the WiFi down (despite wifi_sleep_policy=2), which
-        // silently kills the dashboard and any companion player on the network.
-        try {
-            android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager)
-                    getSystemService(WIFI_SERVICE);
-            if (wm != null) {
-                wifiLock = wm.createWifiLock(
-                        android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "kiosk:wifi");
-                wifiLock.setReferenceCounted(false);
-                wifiLock.acquire();
-                note("wifi lock acquired");
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "wifi lock failed " + e);
-        }
 
         openCamera();
     }
@@ -266,13 +248,8 @@ public class MotionService extends Service {
     void wakeScreen(String why) {
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         if (pm == null) return;
-        // The panel normally stays powered (dark), so motion only has to un-dim the UI.
-        MainActivity activity = MainActivity.instance;
-        if (activity != null) {
-            activity.undimPanel("motion");
-        }
         if (pm.isScreenOn()) {
-            Log.i(TAG, "motion, panel already powered (" + why + ")");
+            Log.i(TAG, "motion but screen already on (" + why + ")");
             return;
         }
         wakes++;
@@ -305,6 +282,5 @@ public class MotionService extends Service {
         catch (Exception e) { Log.e(TAG, "camera release " + e); }
         try { if (partial != null && partial.isHeld()) partial.release(); } catch (Exception e) { /* ignore */ }
         try { if (screenWaker != null && screenWaker.isHeld()) screenWaker.release(); } catch (Exception e) { /* ignore */ }
-        try { if (wifiLock != null && wifiLock.isHeld()) wifiLock.release(); } catch (Exception e) { /* ignore */ }
     }
 }

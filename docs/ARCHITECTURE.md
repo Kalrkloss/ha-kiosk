@@ -50,37 +50,26 @@ command line; `-e` sends a string and `getBooleanExtra` then returns false.
 `FLAG_ACTIVITY_NEW_TASK`. On API 23 a background broadcast may still start an activity, which is one
 more reason `targetSdkVersion` stays at 23.
 
-## Panel policy and motion wake
+## Screen off and motion wake
 
-The panel goes dark after 60 s without touch and without camera motion, but it is **never switched
-off**: the app holds `FLAG_KEEP_SCREEN_ON` and dims the window itself (brightness 0 plus a black
-overlay) instead of letting the system timeout power the display down.
-
-That is a measured decision. On the reference device the WiFi link dies with the panel: `wlan0` drops
-to `NO-CARRIER` within seconds of the display powering off and is back as soon as it wakes. The
-vendor standby power saving wins over `wifi_sleep_policy=2`, over an acquired
-`WIFI_MODE_FULL_HIGH_PERF` lock and over `background_power_saving_enable=0`, and it is not a traffic
-idle timeout either — the interface has no route at all, so a keep-alive from an app cannot help.
-Consequences that shaped the code:
-
-* a powered-off panel means no dashboard, no radio, and any companion player drops off its server;
-* `AudioManager.isMusicActive()` is **not** a usable "is it playing" signal here: the music player
-  keeps an active `AudioTrack` while idle, so the call returns `true` permanently;
-* inbound throughput is not a signal either — idle dashboard and a 128 kbit/s stream measured within
-  0.5 kB/s of each other on this hardware.
-
-While dimmed the WebView is also set `INVISIBLE`: a covered WebView keeps compositing, which measured
-as 33 % of one core, non-stop, enough to make the tablet throttle and feel sluggish. Hiding it drops
-the idle load to single digits.
-
-So "panel looks off" and "the player keeps streaming in the background" only hold together while the
-panel stays powered and merely goes dark. `screen_off_timeout` remains configured as a fallback for
-the case where the app is not running:
+The split of responsibility matters: **the app never holds the screen awake**, and the panel is
+switched off by the normal power policy after `screen_off_timeout` (60 s in the reference setup).
+Two settings make that work on a device that is permanently charging:
 
 ```
 settings put system screen_off_timeout 60000
 svc power stayon false          # a charging device would otherwise never sleep
 ```
+
+Measured on the reference device, and worth knowing before choosing this design: **the WiFi link
+dies with the panel.** `wlan0` drops to `NO-CARRIER` seconds after the display powers down and is
+back once it wakes — vendor standby power saving wins over `wifi_sleep_policy=2`, over an acquired
+`WIFI_MODE_FULL_HIGH_PERF` lock and over `background_power_saving_enable=0`, and it is not a traffic
+idle timeout either (the interface has no route at all). Anything on the device that needs the
+network (a media player, a push target) is therefore offline while the panel is dark. The
+alternative — holding `FLAG_KEEP_SCREEN_ON` and dimming the window instead of switching it off —
+keeps the radio alive but leaves the panel powered; this project takes the real screen-off and
+accepts the silent interval.
 
 `MotionService` is a foreground service that:
 
@@ -93,10 +82,8 @@ svc power stayon false          # a charging device would otherwise never sleep
 4. computes the **mean absolute difference of the luma plane** against the previous analysed frame,
    sampled on an 8-pixel grid. Two *consecutive* samples above the threshold (default 7 of 255)
    count as motion;
-5. clears the dim (`panel visible (motion)`); as a fallback for the case where the system *did*
-   switch the panel off, it also acquires `SCREEN_BRIGHT_WAKE_LOCK | ACQUIRE_CAUSES_WAKEUP`
-   (deprecated, but the only public way — a device owner cannot switch a screen *on*), released
-   after 20 s.
+5. turns the screen back on with `SCREEN_BRIGHT_WAKE_LOCK | ACQUIRE_CAUSES_WAKEUP` (deprecated, but
+   the only public way — a device owner cannot switch a screen *on*), released after 20 s.
 
 Three guards keep this from waking the screen by itself, and all three are needed:
 
@@ -149,8 +136,8 @@ indistinguishable from "the kiosk hangs". Two mechanisms keep the dashboard aliv
 * **Heartbeat** — an injected script calls `kioskBeat.remember()` over a `@JavascriptInterface`
   every five seconds. Ninety seconds of silence means the page is gone and it is reloaded.
 * **Recycling while dark** — a long-lived Home Assistant frontend grows; when the process passes
-  ~380 MB PSS or the page is older than six hours, it is rebuilt. That happens while the panel is
-  dark, so nobody sees the reload, and the daytime session stays small.
+  ~380 MB PSS or the page is older than six hours, it is rebuilt. That happens while the screen is
+  off, so nobody sees the reload, and the daytime session stays small.
 
 `CompanionWatch` rides on the motion service's existing one-second tick and checks the companion's
   process once a minute; two consecutive misses and a five-minute rate limit keep it from restarting

@@ -52,10 +52,7 @@ public class MainActivity extends Activity {
     Reloader reloader;
     boolean loadFailed = false;
     boolean released = false;
-    boolean dimmed = false;
     long lastLoad = System.currentTimeMillis();
-    long lastInteraction;
-    View dimOverlay;
     IdleCheck idleCheck;
 
     /**
@@ -133,8 +130,6 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         instance = this;
-        // The panel must stay powered (see checkIdle): dark, but never switched off.
-        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         Intent intent0 = getIntent();
         if (intent0 != null && intent0.getBooleanExtra("kiosk_clear_device_owner", false)) {
@@ -171,8 +166,6 @@ public class MainActivity extends Activity {
         web.loadUrl(url);
         lastLoad = System.currentTimeMillis();
 
-        buildDimOverlay();
-        lastInteraction = System.currentTimeMillis();
         idleCheck = new IdleCheck(this);
         handler.postDelayed(idleCheck, IDLE_CHECK_MS);
 
@@ -183,7 +176,6 @@ public class MainActivity extends Activity {
 
     /** How often the panel policy is re-evaluated. */
     static final long IDLE_CHECK_MS = 5000;
-    static final long IDLE_TIMEOUT_MS = 60000;
     static final long BEAT_TIMEOUT_MS = 90000;
     static final long MAX_PAGE_AGE_MS = 6L * 60 * 60 * 1000;
     static final int MAX_PSS_MB = 380;
@@ -201,9 +193,11 @@ public class MainActivity extends Activity {
         try {
             if (!released) {
                 long now = System.currentTimeMillis();
-                if (!dimmed && now - lastInteraction >= IDLE_TIMEOUT_MS) dimPanel();
-                if (!dimmed) checkRendererAlive(now);
-                if (dimmed) maybeRecyclePage(now);
+                if (screenOn()) {
+                    checkRendererAlive(now);
+                } else {
+                    maybeRecyclePage(now);
+                }
             }
         } catch (Exception e) {
             Log.e(TAG, "checkIdle " + e);
@@ -272,57 +266,13 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void buildDimOverlay() {
-        dimOverlay = new View(this);
-        dimOverlay.setBackgroundColor(Color.BLACK);
-        dimOverlay.setVisibility(View.GONE);
-        addContentView(dimOverlay, new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-    }
-
-    void dimPanel() {
-        dimmed = true;
+    boolean screenOn() {
         try {
-            android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
-            lp.screenBrightness = 0.0f;
-            getWindow().setAttributes(lp);
-            if (dimOverlay != null) dimOverlay.setVisibility(View.VISIBLE);
-            if (web != null) {
-                // A covered WebView keeps compositing; leaving it visible burns CPU (measured:
-                // 33 % of one core, non-stop) and heats the tablet until it throttles.
-                web.setVisibility(View.INVISIBLE);
-            }
+            android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+            return pm == null || pm.isScreenOn();
         } catch (Exception e) {
-            Log.e(TAG, "dimPanel " + e);
+            return true;
         }
-        ControlReceiver.log(this, "panel dark");
-    }
-
-    /** Called on touch/key input and on camera motion. */
-    void undimPanel(String why) {
-        lastInteraction = System.currentTimeMillis();
-        if (!dimmed) return;
-        dimmed = false;
-        try {
-            android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
-            lp.screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
-            getWindow().setAttributes(lp);
-            if (dimOverlay != null) dimOverlay.setVisibility(View.GONE);
-            if (web != null) {
-                web.setVisibility(View.VISIBLE);
-                web.invalidate();
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "undimPanel " + e);
-        }
-        ControlReceiver.log(this, "panel visible (" + why + ")");
-        goFullscreen();
-    }
-
-    @Override
-    public void onUserInteraction() {
-        super.onUserInteraction();
-        undimPanel("touch");
     }
 
     /** Intent data wins, then the stored preference, then the generic default. */
